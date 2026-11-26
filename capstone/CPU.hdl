@@ -1,0 +1,51 @@
+// CPU.hdl - Hack CPU: ALU + A register + D register + Program Counter
+CHIP CPU {
+    IN  inM[16],          // M value input  (M = contents of RAM[A])
+        instruction[16],  // Instruction for execution
+        reset;            // Signals whether to re-start the current program
+    OUT outM[16],         // M value output
+        writeM,           // Write to M?
+        addressM[15],     // Address in data memory (of M)
+        pc[15];           // Address of next instruction
+
+    PARTS:
+    // instruction[15]: 0 = A-instruction, 1 = C-instruction
+    Not(in=instruction[15], out=aInstr);
+
+    // A register input: A-instruction -> the instruction itself, C-instruction -> ALU output
+    Mux16(a=aluOut, b=instruction, sel=aInstr, out=aIn);
+
+    // Load A for an A-instruction, or for a C-instruction with dest bit d1 (instruction[5])
+    Or(a=aInstr, b=instruction[5], out=loadA);
+    ARegister(in=aIn, load=loadA, out=aOut, out[0..14]=addressM);
+
+    // ALU second operand: a-bit (instruction[12]) selects A (0) or M (1)
+    Mux16(a=aOut, b=inM, sel=instruction[12], out=aluY);
+
+    // D register loads only for C-instruction with dest bit d2 (instruction[4])
+    And(a=instruction[15], b=instruction[4], out=loadD);
+    DRegister(in=aluOut, load=loadD, out=dOut);
+
+    // ALU: control bits c1..c6 = instruction[11..6]
+    ALU(x=dOut, y=aluY,
+        zx=instruction[11], nx=instruction[10],
+        zy=instruction[9],  ny=instruction[8],
+        f=instruction[7],   no=instruction[6],
+        out=aluOut, out=outM, zr=zr, ng=ng);
+
+    // writeM: C-instruction with dest bit d3 (instruction[3])
+    And(a=instruction[15], b=instruction[3], out=writeM);
+
+    // Jump logic: j1 (<0) = instruction[2], j2 (=0) = instruction[1], j3 (>0) = instruction[0]
+    Or(a=zr, b=ng, out=zrOrNg);
+    Not(in=zrOrNg, out=pos);
+    And(a=instruction[2], b=ng,  out=jLT);
+    And(a=instruction[1], b=zr,  out=jEQ);
+    And(a=instruction[0], b=pos, out=jGT);
+    Or(a=jLT, b=jEQ, out=jLE);
+    Or(a=jLE, b=jGT, out=jumpCond);
+    And(a=instruction[15], b=jumpCond, out=jump);
+
+    // Program counter: jump to A, otherwise increment; reset sets it to 0
+    PC(in=aOut, load=jump, inc=true, reset=reset, out[0..14]=pc);
+}
